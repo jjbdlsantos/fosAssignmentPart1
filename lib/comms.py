@@ -16,9 +16,10 @@ class StealthConn(object):
         self.server = server
         self.verbose = verbose
 
-        self.shared_hash = None
         self.cipher_key = None
         self.hmac_key = None
+
+        # Flag indicating if a session has been initiated
         self.is_initialised = False
 
         # PRNG used to generate unique IDs for each message sent
@@ -39,37 +40,18 @@ class StealthConn(object):
             # Receive their public key
             their_public_key = int(self.recv())
             # Obtain our shared secret
-            self.shared_hash = calculate_dh_secret(their_public_key, my_private_key)
-            print("Shared hash: {}".format(self.shared_hash))
+            shared_hash = calculate_dh_secret(their_public_key, my_private_key)
+            print("Shared hash: {}".format(shared_hash))
 
-            # TODO: PRNG using shared_secret as the seed for self.cipher_key and self.hmac_key
-            # Use the shared secret as the seed for a PRNG to generate keys
-            prng = FortunaGenerator.AESGenerator()
-            prng.reseed(bytes(self.shared_hash, "ascii"))
-            # Randomly generate a 128-bit key for hmac
-            self.hmac_key = prng.pseudo_random_data(128)
+            self.generate_keys(shared_hash)
+            self.initialise_prngs(shared_hash)
 
         # Default XOR algorithm can only take a key of length 32
-        self.cipher = XOR.new(self.shared_hash[:4])
+        self.cipher = XOR.new(shared_hash[:4])
         self.is_initialised = True
 
     def send(self, data):
         if self.is_initialised:
-            # If we haven't created the PRNGs, make them
-            if self.send_prng == None:
-                # Split shared_secret into two halves to use as seeds
-                index = int(len(self.shared_hash) / 2)
-                seed_a = self.shared_hash[:index]
-                seed_b = self.shared_hash[index:]
-                seed_a = seed_a.encode("ascii")
-                seed_b = seed_b.encode("ascii")
-
-                # Create and seed the PRNGs
-                self.send_prng = FortunaGenerator.AESGenerator()
-                self.send_prng.reseed(seed_a)
-                self.recv_prng = FortunaGenerator.AESGenerator()
-                self.recv_prng.reseed(seed_b)
-
             # Generate a random number for the message ID
             message_id = self.send_prng.pseudo_random_data(128)
             # Calculate the HMAC
@@ -102,22 +84,8 @@ class StealthConn(object):
         pkt_len = unpacked_contents[0]
 
         encrypted_data = self.conn.recv(pkt_len)
-        # TODO: PRNGs are not initialised on the very first comms! Possible race condition if they both send at the same time
-        # TODO: Look up TTPs?
-        if self.is_initialised:
-            # If we haven't created the PRNGs, make them
-            if self.send_prng == None: #if we don't have a PRNG then make one
-                index = int(len(self.shared_hash) / 2)
-                seed_a = self.shared_hash[:index]
-                seed_b = self.shared_hash[index:]
-                seed_a = seed_a.encode("ascii")
-                seed_b = seed_b.encode("ascii")
-                
-                self.send_prng = FortunaGenerator.AESGenerator() #making the "B" PRNG
-                self.send_prng.reseed(seed_b)
-                self.recv_prng = FortunaGenerator.AESGenerator() #making the "A" PRNG
-                self.recv_prng.reseed(seed_a)
 
+        if self.is_initialised:
             message = self.cipher.decrypt(encrypted_data)
 
             # Split the message back into its component parts (data, ID and HMAC)
@@ -127,7 +95,6 @@ class StealthConn(object):
 
             # Generate the expected message_id
             message_id = self.recv_prng.pseudo_random_data(128) #starting or continuing the sequence (generating the next number in the sequence)
-
             # Generate the HMAC for the received data
             hmac = HMAC.new(self.hmac_key, digestmod=SHA256)
             hmac.update(data)
@@ -139,7 +106,7 @@ class StealthConn(object):
                 print("ID Received: {}".format(received_id))
                 print("ID Expected: {}".format(message_id))
                 print("HMAC Received: {}".format(hmac_recv))
-                print("HMAC Expected: {}".format(hmac))
+                print("HMAC Expected: {}".format(hmac.hexdigest()))
 
             # Check if the expected and received message IDs match
             if received_id == message_id:
@@ -165,4 +132,41 @@ class StealthConn(object):
 
     def close(self):
         self.conn.close()
+
+    def generate_keys(self, seed):
+        # Randomly generate keys for AES and HMAC
+
+        # Create and seed the PRNG
+        prng = FortunaGenerator.AESGenerator()
+        prng.reseed(seed.encode("ascii"))
+
+        # TODO: Randomly generate a 128-bit key for AES
+
+        # Randomly generate a 128-bit key for HMAC
+        self.hmac_key = prng.pseudo_random_data(128)
+
+    def initialise_prngs(self, seed):
+        # Initialise the PRNGs to use for generating the message IDs for messages sent and
+        # determining the expected message ID for messages received (used to prevent replay attacks)
+
+        # Split shared_secret into two halves to use as seeds
+        index = int(len(seed) / 2)
+        seed_a = seed[:index]
+        seed_b = seed[index:]
+        seed_a = seed_a.encode("ascii")
+        seed_b = seed_b.encode("ascii")
+
+        # Create and seed the PRNGs
+        prng_a = FortunaGenerator.AESGenerator()
+        prng_a.reseed(seed_b)
+        prng_b = FortunaGenerator.AESGenerator()
+        prng_b.reseed(seed_a)
+
+        # Assign the PRNGs depending on if it's a server or a client
+        if self.server:
+            self.send_prng = prng_a
+            self.recv_prng = prng_b
+        else:
+            self.send_prng = prng_b
+            self.recv_prng = prng_a
 
