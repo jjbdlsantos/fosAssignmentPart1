@@ -20,8 +20,11 @@ class StealthConn(object):
         self.cipher_key = None
         self.hmac_key = None
         self.is_initialised = False
-        self.sendprng = None
-        self.recvprng = None
+
+        # PRNG used to generate unique IDs for each message sent
+        self.send_prng = None
+        # PRNG used to generate the expected ID for a received message
+        self.recv_prng = None
 
         self.initiate_session()
 
@@ -52,29 +55,31 @@ class StealthConn(object):
 
     def send(self, data):
         if self.is_initialised:
-            if self.sendprng == None: #if we don't have a PRNG then make one
-                # Making it out of the DH secret, which becomes the seed
+            # If we haven't created the PRNGs, make them
+            if self.send_prng == None:
+                # Split shared_secret into two halves to use as seeds
                 index = int(len(self.shared_hash) / 2)
                 seed_a = self.shared_hash[:index]
                 seed_b = self.shared_hash[index:]
                 seed_a = seed_a.encode("ascii")
                 seed_b = seed_b.encode("ascii")
 
-                self.sendprng = FortunaGenerator.AESGenerator() #making the "A" PRNG
-                self.sendprng.reseed(seed_a)
-                self.recvprng = FortunaGenerator.AESGenerator() #making the "B" PRNG
-                self.recvprng.reseed(seed_b)
+                # Create and seed the PRNGs
+                self.send_prng = FortunaGenerator.AESGenerator()
+                self.send_prng.reseed(seed_a)
+                self.recv_prng = FortunaGenerator.AESGenerator()
+                self.recv_prng.reseed(seed_b)
 
-            message_id = self.sendprng.pseudo_random_data(128) #starting or continuing the sequence (generating the next number in the sequence)
-
+            # Generate a random number for the message ID
+            message_id = self.send_prng.pseudo_random_data(128)
+            # Calculate the HMAC
             hmac = HMAC.new(self.hmac_key, digestmod=SHA256)  # TODO: is SHA256 a good idea?
             hmac.update(data)
-
-            print("First ID: {}".format(message_id))
-
+            # Add the ID and HMAC to the message
             message = data + message_id + bytes(hmac.hexdigest(), "ascii")
 
             encrypted_data = self.cipher.encrypt(message)
+
             if self.verbose:
                 print("Original data: {}".format(data))
                 print("Message ID: {}".format(message_id))
@@ -97,30 +102,33 @@ class StealthConn(object):
         pkt_len = unpacked_contents[0]
 
         encrypted_data = self.conn.recv(pkt_len)
-        if self.is_initialised: #it's in here because it's after the channel is open
-            if self.sendprng == None: #if we don't have a PRNG then make one
+        # TODO: PRNGs are not initialised on the very first comms! Possible race condition if they both send at the same time
+        # TODO: Look up TTPs?
+        if self.is_initialised:
+            # If we haven't created the PRNGs, make them
+            if self.send_prng == None: #if we don't have a PRNG then make one
                 index = int(len(self.shared_hash) / 2)
                 seed_a = self.shared_hash[:index]
                 seed_b = self.shared_hash[index:]
                 seed_a = seed_a.encode("ascii")
                 seed_b = seed_b.encode("ascii")
                 
-                self.sendprng = FortunaGenerator.AESGenerator() #making the "B" PRNG
-                self.sendprng.reseed(seed_b)
-                self.recvprng = FortunaGenerator.AESGenerator() #making the "A" PRNG
-                self.recvprng.reseed(seed_a)
+                self.send_prng = FortunaGenerator.AESGenerator() #making the "B" PRNG
+                self.send_prng.reseed(seed_b)
+                self.recv_prng = FortunaGenerator.AESGenerator() #making the "A" PRNG
+                self.recv_prng.reseed(seed_a)
 
             message = self.cipher.decrypt(encrypted_data)
+
+            # Split the message back into its component parts (data, ID and HMAC)
             data = message[:-192] #gets me the message
             received_id = message[-192:-64] #gets me the packet id
             hmac_recv = message[-64:]
 
             # Generate the expected message_id
-            message_id = self.recvprng.pseudo_random_data(128) #starting or continuing the sequence (generating the next number in the sequence)
+            message_id = self.recv_prng.pseudo_random_data(128) #starting or continuing the sequence (generating the next number in the sequence)
 
-            print("Expected ID: {}".format(message_id))
-
-            # Generate the correct HMAC
+            # Generate the HMAC for the received data
             hmac = HMAC.new(self.hmac_key, digestmod=SHA256)
             hmac.update(data)
 
@@ -133,19 +141,23 @@ class StealthConn(object):
                 print("HMAC Received: {}".format(hmac_recv))
                 print("HMAC Expected: {}".format(hmac))
 
-            if received_id == message_id: #if the id I received matches the id that was sent (is expected) then great!
+            # Check if the expected and received message IDs match
+            if received_id == message_id:
+                # If they do, the message is not a replay
                 print("Message IDs match!")
+
                 # Check if the generated and received HMACs match
                 if bytes(hmac.hexdigest(), "ascii") == hmac_recv:
                     # If they do, assume the data received has not been tampered with
                     print("HMACs match!")
                 else:
-                    # If the HMACs don't match, discard the data and return None
+                    # If the HMACs don't match, discard the data and return an error
                     print("HMACs don't match!")
-                    data = None
-            else: #otherwise it's from a bad person so delete it!
-                print("Not legit, ABORT")
-                data = None #get rid of the message because it's a fake!
+                    data = "Error! HMACs don't match."
+            else:
+                # If the IDs don't match, discard the data and return an error
+                print("Message IDs don't match!")
+                data = "Error! IDs don't match."
         else:
             data = encrypted_data
 
