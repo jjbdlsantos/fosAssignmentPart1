@@ -56,7 +56,7 @@ class StealthConn(object):
             message_id = self.send_prng.pseudo_random_data(128)
             # Calculate the HMAC
             hmac = HMAC.new(self.hmac_key, digestmod=SHA256)  # TODO: is SHA256 a good idea?
-            hmac.update(data)
+            hmac.update(data + message_id)
             # Add the ID and HMAC to the message
             message = data + message_id + bytes(hmac.hexdigest(), "ascii")
 
@@ -89,15 +89,15 @@ class StealthConn(object):
             message = self.cipher.decrypt(encrypted_data)
 
             # Split the message back into its component parts (data, ID and HMAC)
-            data = message[:-192] #gets me the message
-            received_id = message[-192:-64] #gets me the packet id
+            data = message[:-192]
+            received_id = message[-192:-64]
             hmac_recv = message[-64:]
 
             # Generate the expected message_id
-            message_id = self.recv_prng.pseudo_random_data(128) #starting or continuing the sequence (generating the next number in the sequence)
+            message_id = self.recv_prng.pseudo_random_data(128)
             # Generate the HMAC for the received data
             hmac = HMAC.new(self.hmac_key, digestmod=SHA256)
-            hmac.update(data)
+            hmac.update(data + received_id)
 
             if self.verbose:
                 print("Receiving packet of length {}".format(pkt_len))
