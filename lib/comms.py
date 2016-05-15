@@ -8,6 +8,7 @@ from Crypto.Random.Fortuna import FortunaGenerator
 from Crypto.Cipher import AES
 from Crypto.Hash import HMAC
 from Crypto.Hash import SHA256
+from Crypto import Random
 
 class StealthConn(object):
     def __init__(self, conn, client=False, server=False, verbose=False):
