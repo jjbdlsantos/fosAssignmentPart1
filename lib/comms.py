@@ -6,9 +6,9 @@ from dh import create_dh_key, calculate_dh_secret
 
 from Crypto.Random.Fortuna import FortunaGenerator
 from Crypto.Cipher import AES
+from Crypto import Random
 from Crypto.Hash import HMAC
 from Crypto.Hash import SHA256
-from Crypto import Random
 
 class StealthConn(object):
     def __init__(self, conn, client=False, server=False, verbose=False):
@@ -19,8 +19,8 @@ class StealthConn(object):
         self.verbose = verbose
 
         self.cipher_key = None
-        self.hmac_key = None
-        self.AES_key = None
+        self.hased_hmac_key = None
+        self.hased_AES_key = None
 
         # Flag indicating if a session has been initiated
         self.is_initialised = False
@@ -58,7 +58,7 @@ class StealthConn(object):
             # Generate a random number for the message ID
             message_id = self.send_prng.pseudo_random_data(128)
             # Calculate the HMAC
-            hmac = HMAC.new(self.hmac_key, digestmod=SHA256)  # TODO: is SHA256 a good idea?
+            hmac = HMAC.new(self.hashed_hmac_key, digestmod=SHA256)  # TODO: is SHA256 a good idea?
             hmac.update(data + message_id)
             # Add the ID and HMAC to the message
             message = data + message_id + bytes(hmac.hexdigest(), "ascii")
@@ -99,7 +99,7 @@ class StealthConn(object):
             # Generate the expected message_id
             message_id = self.recv_prng.pseudo_random_data(128)
             # Generate the HMAC for the received data
-            hmac = HMAC.new(self.hmac_key, digestmod=SHA256)
+            hmac = HMAC.new(self.hashed_hmac_key, digestmod=SHA256)
             hmac.update(data + received_id)
 
             if self.verbose:
@@ -143,10 +143,11 @@ class StealthConn(object):
         prng = FortunaGenerator.AESGenerator()
         prng.reseed(seed.encode("ascii"))
 
-        self.AES_key = prng.pseudo_random_data(16)
-
+        AES_key = prng.pseudo_random_data(16)
+        self.hashed_AES_key = bytes(SHA256.new(AES_key).hexdigest(), "ascii")
         # Randomly generate a 128-bit key for HMAC
-        self.hmac_key = prng.pseudo_random_data(16)
+        hmac_key = prng.pseudo_random_data(16)
+        self.hashed_hmac_key = bytes(SHA256.new(hmac_key).hexdigest(), "ascii")
 
     def initialise_prngs(self, seed):
         # Initialise the PRNGs to use for generating the message IDs for messages sent and
@@ -172,14 +173,44 @@ class StealthConn(object):
         else:
             self.send_prng = prng_b
             self.recv_prng = prng_a
+
+    def padData(self, msg, base = 16):
+        msgLen = len(msg)
+        if (msgLen % base == 0):
+            return msg
+        else:
+            paddingNum = base - msgLen%base
+            paddingBlock = Random.get_random_bytes(paddingNum)
+            return paddingBlock + msg
     
     def encryptAES(self, message):
+        paddedLengthData = self.lengthDataBlock(message)
+
         iv = Random.new().read(AES.block_size)
-        acipher = AES.new(self.AES_key, AES.MODE_CFB, iv)
-        return iv + acipher.encrypt(message)
+        acipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
+        return iv + acipher.encrypt(self.padData(message)) + paddedLengthData
 
     def decryptAES(self, encrypted_data):
+        digiToConv = encrypted_data[-1:]
+        digits = int(digiToConv)
+        lenToConv = encrypted_data[-(digits + 1):-1]
+        lengthOfMsg = int(lenToConv)
+
         iv = encrypted_data[:16]
-        cipher = AES.new(self.AES_key, AES.MODE_CFB, iv)
-        return cipher.decrypt(encrypted_data[16:])
+        cipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
+        decrypt = cipher.decrypt(encrypted_data)
+
+        origText = decrypt[16:-16]
+        origText = origText[-lengthOfMsg:]
+        return origText
+
+    def lengthDataBlock(self, message):
+        origLength = len(message)
+        digitCount = len(str(origLength))
+
+        oLenB = str(origLength).encode()
+        digCntB = str(digitCount).encode()
+        dataToPad = oLenB + digCntB
+
+        return self.padData(dataToPad)
 
