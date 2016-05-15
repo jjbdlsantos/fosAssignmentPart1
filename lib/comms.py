@@ -5,6 +5,7 @@ from Crypto.Cipher import XOR
 from dh import create_dh_key, calculate_dh_secret
 
 from Crypto.Random.Fortuna import FortunaGenerator
+from Crypto.Cipher import AES
 from Crypto.Hash import HMAC
 from Crypto.Hash import SHA256
 
@@ -18,6 +19,7 @@ class StealthConn(object):
 
         self.cipher_key = None
         self.hmac_key = None
+        self.AES_key = None
 
         # Flag indicating if a session has been initiated
         self.is_initialised = False
@@ -60,7 +62,7 @@ class StealthConn(object):
             # Add the ID and HMAC to the message
             message = data + message_id + bytes(hmac.hexdigest(), "ascii")
 
-            encrypted_data = self.cipher.encrypt(message)
+            encrypted_data = self.encryptAES(message)
 
             if self.verbose:
                 print("Original data: {}".format(data))
@@ -86,7 +88,7 @@ class StealthConn(object):
         encrypted_data = self.conn.recv(pkt_len)
 
         if self.is_initialised:
-            message = self.cipher.decrypt(encrypted_data)
+            message = self.decryptAES(encrypted_data)
 
             # Split the message back into its component parts (data, ID and HMAC)
             data = message[:-192]
@@ -140,10 +142,10 @@ class StealthConn(object):
         prng = FortunaGenerator.AESGenerator()
         prng.reseed(seed.encode("ascii"))
 
-        # TODO: Randomly generate a 128-bit key for AES
+        self.AES_key = prng.pseudo_random_data(16)
 
         # Randomly generate a 128-bit key for HMAC
-        self.hmac_key = prng.pseudo_random_data(128)
+        self.hmac_key = prng.pseudo_random_data(16)
 
     def initialise_prngs(self, seed):
         # Initialise the PRNGs to use for generating the message IDs for messages sent and
@@ -169,4 +171,14 @@ class StealthConn(object):
         else:
             self.send_prng = prng_b
             self.recv_prng = prng_a
+    
+    def encryptAES(self, message):
+        iv = Random.new().read(AES.block_size)
+        acipher = AES.new(self.AES_key, AES.MODE_CFB, iv)
+        return iv + acipher.encrypt(message)
+
+    def decryptAES(self, encrypted_data):
+        iv = encrypted_data[:16]
+        cipher = AES.new(self.AES_key, AES.MODE_CFB, iv)
+        return cipher.decrypt(encrypted_data[16:])
 
