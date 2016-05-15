@@ -1,4 +1,4 @@
-from Crypto.Hash import SHA512
+from Crypto.Hash import SHA256
 from Crypto.Random import random
 
 from lib.helpers import read_hex
@@ -59,5 +59,5 @@ def calculate_dh_secret(their_public, my_private):
     # (b) We can convert to raw bytes easily
     # (c) We could add additional information if we wanted
     # Feel free to change SHA256 to a different value if more appropriate
-    shared_hash = SHA512.new(shared_secret).hexdigest()
+    shared_hash = SHA256.new(shared_secret).hexdigest()
     return shared_hash
