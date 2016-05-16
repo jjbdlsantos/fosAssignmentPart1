@@ -195,7 +195,7 @@ class StealthConn(object):
         digiToConv = encrypted_data[-1:]
         digits = int(digiToConv)
         lenToConv = encrypted_data[-(digits + 1):-1]
-        lengthOfMsg = int(lenToConv)
+        lengthOfMsg = self.unpackageData(encrypted_data)
 
         iv = encrypted_data[:16]
         cipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
@@ -214,4 +214,10 @@ class StealthConn(object):
         dataToPad = oLenB + digCntB
 
         return self.padData(dataToPad)
+        
+    def unpackageData(self, block):
+        digiToConv = block[-1:]
+        digits = int(digiToConv)
+        lenToConv = block[-(digits + 1):-1]
+        return int(lenToConv)
 
