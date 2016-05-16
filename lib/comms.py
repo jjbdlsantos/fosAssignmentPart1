@@ -19,8 +19,8 @@ class StealthConn(object):
         self.verbose = verbose
 
         self.cipher_key = None
-        self.hased_hmac_key = None
-        self.hased_AES_key = None
+        self.hashed_hmac_key = None
+        self.hashed_AES_key = None
 
         # Flag indicating if a session has been initiated
         self.is_initialised = False
@@ -143,6 +143,7 @@ class StealthConn(object):
         prng = FortunaGenerator.AESGenerator()
         prng.reseed(seed.encode("ascii"))
 
+        # Randomly generate a 128-bit key for AES
         AES_key = prng.pseudo_random_data(16)
         self.hashed_AES_key = bytes(SHA256.new(AES_key).hexdigest(), "ascii")
         # Randomly generate a 128-bit key for HMAC
