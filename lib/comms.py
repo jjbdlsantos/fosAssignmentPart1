@@ -183,25 +183,21 @@ class StealthConn(object):
             paddingNum = base - msgLen%base
             paddingBlock = Random.get_random_bytes(paddingNum)
             return paddingBlock + msg
-    
+
     def encryptAES(self, message):
         paddedLengthData = self.lengthDataBlock(message)
-
         iv = Random.new().read(AES.block_size)
-        acipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
-        return iv + acipher.encrypt(self.padData(message)) + paddedLengthData
+        AESCipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
+        return iv + AESCipher.encrypt(self.padData(message)) + AESCipher.encrypt(paddedLengthData)
 
     def decryptAES(self, encrypted_data):
-        digiToConv = encrypted_data[-1:]
-        digits = int(digiToConv)
-        lenToConv = encrypted_data[-(digits + 1):-1]
-        lengthOfMsg = self.unpackageData(encrypted_data)
-
         iv = encrypted_data[:16]
         cipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
-        decrypt = cipher.decrypt(encrypted_data)
 
-        origText = decrypt[16:-16]
+        decryptedData = cipher.decrypt(encrypted_data[16:])
+        lengthOfMsg = self.unpackageLengthData(decryptedData)
+
+        origText = decryptedData[:-16]
         origText = origText[-lengthOfMsg:]
         return origText
 
@@ -215,7 +211,7 @@ class StealthConn(object):
 
         return self.padData(dataToPad)
         
-    def unpackageData(self, block):
+    def unpackageLengthData(self, block):
         digiToConv = block[-1:]
         digits = int(digiToConv)
         lenToConv = block[-(digits + 1):-1]
