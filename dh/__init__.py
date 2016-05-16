@@ -30,7 +30,8 @@ BBE11757 7A615D6C 770988C0 BAD946E2 08E24FA0 74E5AB31
 93B4EA98 8D8FDDC1 86FFB7DC 90A6C08F 4DF435C9 34063199
 FFFFFFFF FFFFFFFF"""
 # Convert from the value supplied in the RFC to an integer
-prime = read_hex(raw_prime)
+prime_p = read_hex(raw_prime)
+prime_q = (prime_p - 1) // 2
 
 
 # Project TODO: write the appropriate code to perform DH key exchange
@@ -40,17 +41,17 @@ def create_dh_key():
     # Returns (public, private)
 
     # Selects a random private key (a) from Zp
-    private = random.randint(1, (prime - 1))
+    private = random.randint(2, (prime_q - 2))
 
     # Calculates g^a mod p (2 ** private % prime)
-    public = pow(2, private, prime)
+    public = pow(2, private, prime_p)
 
     return public, private
 
 
 def calculate_dh_secret(their_public, my_private):
     # Calculate the shared secret & format as ascii bytes
-    shared_secret = pow(their_public, my_private, prime)
+    shared_secret = pow(their_public, my_private, prime_p)
     shared_secret = bytes(str(shared_secret), "ascii")
 
     # Hash the value so that:
@@ -59,5 +60,7 @@ def calculate_dh_secret(their_public, my_private):
     # (b) We can convert to raw bytes easily
     # (c) We could add additional information if we wanted
     # Feel free to change SHA256 to a different value if more appropriate
+
     shared_hash = SHA256.new(shared_secret).hexdigest()
     return shared_hash
+
