@@ -188,18 +188,18 @@ class StealthConn(object):
         paddedLengthData = self.lengthDataBlock(message)
         iv = Random.new().read(AES.block_size)
         AESCipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
-        return iv + AESCipher.encrypt(self.padData(message)) + AESCipher.encrypt(paddedLengthData)
+        return iv + AESCipher.encrypt(self.ANSI_X923_pad(message, 16))
+        #AESCipher.encrypt(paddedLengthData)
 
     def decryptAES(self, encrypted_data):
         iv = encrypted_data[:16]
         cipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
 
-        decryptedData = cipher.decrypt(encrypted_data[16:])
-        lengthOfMsg = self.unpackageLengthData(decryptedData)
-
-        origText = decryptedData[:-16]
-        origText = origText[-lengthOfMsg:]
-        return origText
+        #decryptedData = cipher.decrypt(encrypted_data[16:])
+        #lengthOfMsg = self.unpackageLengthData(decryptedData)
+        paddedData = cipher.decrypt(encrypted_data[16:])
+        unpaddedData = self.ANSI_X923_unpad(paddedData, 16)
+        return unpaddedData
 
     def lengthDataBlock(self, message):
         origLength = len(message)
@@ -217,3 +217,23 @@ class StealthConn(object):
         lenToConv = block[-(digits + 1):-1]
         return int(lenToConv)
 
+    def ANSI_X923_pad(self, m, pad_length):
+        # Work out how many bytes need to be added
+        required_padding = pad_length - (len(m) % pad_length)
+        # Use a bytearray so we can add to the end of m
+        b = bytearray(m)
+        # Then k-1 zero bytes, where k is the required padding
+        b.extend(bytes("\x00" * (required_padding-1), "ascii"))
+        # And finally adding the number of padding bytes added
+        b.append(required_padding)
+        return bytes(b)
+
+    def ANSI_X923_unpad(self, m, pad_length):
+        # The last byte should represent the number of padding bytes added
+        required_padding = m[-1]
+        # Ensure that there are required_padding - 1 zero bytes
+        if m.count(bytes([0]), -required_padding, -1) == required_padding - 1:
+            return m[:-required_padding]
+        else:
+        # Raise an exception in the case of an invalid padding
+            raise AssertionError("Padding was invalid")
