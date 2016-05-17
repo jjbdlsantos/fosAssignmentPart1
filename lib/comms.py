@@ -175,47 +175,17 @@ class StealthConn(object):
             self.send_prng = prng_b
             self.recv_prng = prng_a
 
-    def padData(self, msg, base = 16):
-        msgLen = len(msg)
-        if (msgLen % base == 0):
-            return msg
-        else:
-            paddingNum = base - msgLen%base
-            paddingBlock = Random.get_random_bytes(paddingNum)
-            return paddingBlock + msg
-
     def encryptAES(self, message):
-        paddedLengthData = self.lengthDataBlock(message)
         iv = Random.new().read(AES.block_size)
         AESCipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
         return iv + AESCipher.encrypt(self.ANSI_X923_pad(message, 16))
-        #AESCipher.encrypt(paddedLengthData)
 
     def decryptAES(self, encrypted_data):
         iv = encrypted_data[:16]
         cipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
-
-        #decryptedData = cipher.decrypt(encrypted_data[16:])
-        #lengthOfMsg = self.unpackageLengthData(decryptedData)
         paddedData = cipher.decrypt(encrypted_data[16:])
         unpaddedData = self.ANSI_X923_unpad(paddedData, 16)
         return unpaddedData
-
-    def lengthDataBlock(self, message):
-        origLength = len(message)
-        digitCount = len(str(origLength))
-
-        oLenB = str(origLength).encode()
-        digCntB = str(digitCount).encode()
-        dataToPad = oLenB + digCntB
-
-        return self.padData(dataToPad)
-        
-    def unpackageLengthData(self, block):
-        digiToConv = block[-1:]
-        digits = int(digiToConv)
-        lenToConv = block[-(digits + 1):-1]
-        return int(lenToConv)
 
     def ANSI_X923_pad(self, m, pad_length):
         # Work out how many bytes need to be added
