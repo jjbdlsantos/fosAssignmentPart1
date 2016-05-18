@@ -18,7 +18,7 @@ class StealthConn(object):
         self.server = server
         self.verbose = verbose
 
-        self.cipher_key = None
+        # Hashed keys to be used for HMAC and AES
         self.hashed_hmac_key = None
         self.hashed_AES_key = None
 
@@ -46,7 +46,7 @@ class StealthConn(object):
             shared_hash = calculate_dh_secret(their_public_key, my_private_key)
             print("Shared hash: {}".format(shared_hash))
 
-            self.generate_keys(shared_hash)
+            self.generate_hashed_aes_and_hmac_keys(shared_hash)
             self.initialise_prngs(shared_hash)
 
         # Default XOR algorithm can only take a key of length 32
@@ -91,33 +91,33 @@ class StealthConn(object):
         if self.is_initialised:
             message = self.decryptAES(encrypted_data)
 
-            # Split the message back into its component parts (data, ID and HMAC)
+            # Split the message received back into its component parts (data, ID and HMAC)
             data = message[:-192]
-            received_id = message[-192:-64]
-            hmac_recv = message[-64:]
+            id_received = message[-192:-64]
+            hmac_received = message[-64:]
 
             # Generate the expected message_id
-            message_id = self.recv_prng.pseudo_random_data(128)
-            # Generate the HMAC for the received data
-            hmac = HMAC.new(self.hashed_hmac_key, digestmod=SHA256)
-            hmac.update(data + received_id)
+            id_expected = self.recv_prng.pseudo_random_data(128)
+            # Generate the HMAC for the received data + id
+            hmac_generated = HMAC.new(self.hashed_hmac_key, digestmod=SHA256)
+            hmac_generated.update(data + received_id)
 
             if self.verbose:
                 print("Receiving packet of length {}".format(pkt_len))
                 print("Encrypted data: {}".format(repr(encrypted_data)))
                 print("Original data: {}".format(data))
-                print("ID Received: {}".format(received_id))
-                print("ID Expected: {}".format(message_id))
-                print("HMAC Received: {}".format(hmac_recv))
-                print("HMAC Expected: {}".format(hmac.hexdigest()))
+                print("ID Received: {}".format(id_received))
+                print("ID Expected: {}".format(id_expected))
+                print("HMAC Received: {}".format(hmac_received))
+                print("HMAC Expected: {}".format(hmac_generated.hexdigest()))
 
             # Check if the expected and received message IDs match
-            if received_id == message_id:
+            if id_received == id_expected:
                 # If they do, the message is not a replay
                 print("Message IDs match!")
 
                 # Check if the generated and received HMACs match
-                if bytes(hmac.hexdigest(), "ascii") == hmac_recv:
+                if bytes(hmac_generated.hexdigest(), "ascii") == hmac_received:
                     # If they do, assume the data received has not been tampered with
                     print("HMACs match!")
                 else:
@@ -136,8 +136,8 @@ class StealthConn(object):
     def close(self):
         self.conn.close()
 
-    def generate_keys(self, seed):
-        # Randomly generate keys for AES and HMAC
+    def generate_hashed_aes_and_hmac_keys(self, seed):
+        # Randomly generate hashed keys for AES and HMAC
 
         # Create and seed the PRNG
         prng = FortunaGenerator.AESGenerator()
@@ -176,18 +176,25 @@ class StealthConn(object):
             self.recv_prng = prng_a
 
     def encryptAES(self, message):
+        # Generates a random IV
         iv = Random.new().read(AES.block_size)
+        # Creates a new AES cipher using 128 bits of the hashed AES key and CBC mode
         AESCipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
+        # Encrypts the padded data and returns the IV + ciphertext
         return iv + AESCipher.encrypt(self.ANSI_X923_pad(message, 16))
 
     def decryptAES(self, encrypted_data):
+        # Extracts the IV from the encrypted data
         iv = encrypted_data[:16]
+        # Creates a new AES cipher using 128 bits of the hashed AES key and CBC mode
         cipher = AES.new(self.hashed_AES_key[:16], AES.MODE_CBC, iv)
+        # Decrypts the data (which has been padded)
         paddedData = cipher.decrypt(encrypted_data[16:])
+        # Unpads and returns the data
         unpaddedData = self.ANSI_X923_unpad(paddedData, 16)
         return unpaddedData
 
-    def ANSI_X923_pad(self, m, pad_length):
+    def ANSI_X923_pad(self, m, pad_length):        
         # Work out how many bytes need to be added
         required_padding = pad_length - (len(m) % pad_length)
         # Use a bytearray so we can add to the end of m
@@ -207,3 +214,4 @@ class StealthConn(object):
         else:
         # Raise an exception in the case of an invalid padding
             raise AssertionError("Padding was invalid")
+
